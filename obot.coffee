@@ -235,6 +235,27 @@ renderPlayButton = (ctx) ->
 
   return
 
+renderUndoButton = (ctx) ->
+  ics = inner_control_size
+  ctx.beginPath()
+  ctx.arc(0,0,ics*.3, -Math.PI/8, Math.PI/8, true)
+
+  arrowEnd =
+    x: Math.cos(-Math.PI/8)*ics*.3
+    y:-Math.sin(-Math.PI/8)*ics*.3
+  innerArrow =
+    x: arrowEnd.x + Math.cos(Math.PI*(1-1/8+.125))*ics*.3*.5
+    y: arrowEnd.y - Math.sin(Math.PI*(1-1/8+.125))*ics*.3*.5
+  outerArrow =
+    x: arrowEnd.x + Math.cos(Math.PI*(-1/8-.3))*ics*.3*.5
+    y: arrowEnd.y - Math.sin(Math.PI*(-1/8-.3))*ics*.3*.5
+
+  ctx.lineTo(innerArrow.x, innerArrow.y)
+  ctx.moveTo(arrowEnd.x, arrowEnd.y)
+  ctx.lineTo(outerArrow.x, outerArrow.y)
+
+  ctx.stroke()
+  return
 
 # TODO: these should handle the passage of time? or maybe that is up to
 # stepLevelSimulation?
@@ -277,7 +298,7 @@ addCommandButtonAction = (level) ->
     when levelMode.STOPPED
       level.commands[level.current_command] = @cmd
       level.advanceCurrentCommand()
-    when levelMode.LIVE_EDIT, levelMode.PLAYING
+    when levelMode.PLAYING
       level.commands[level.commands.length] = @cmd
 
   return
@@ -285,6 +306,18 @@ addCommandButtonAction = (level) ->
 playButtonAction = (level) ->
   level.resetAndRun()
   return
+
+undoButtonAction = (level) ->
+  if level.commands.length == 0
+    return false
+
+  level.commands = level.commands[...-1]
+
+  if level.current_command >= level.commands.length
+    level.resetAndRun()
+    while level.step()
+      true
+
 
 arrowButtonRender = (ctx) ->
   renderArrow(ctx, @dir.theta, inner_control_size)
@@ -312,13 +345,15 @@ go_down_button =
 play_button =
   render: renderPlayButton
   action: playButtonAction
+undo_button =
+  render: renderUndoButton
+  action: undoButtonAction
 
 # level
 
 levelMode =
-  STOPPED: 0
-  PLAYING: 1
-  LIVE_EDIT: 2
+  STOPPED: 1
+  PLAYING: 2
 
 levelAnimMode =
   READY: 1  # ready to run the next command
@@ -331,7 +366,6 @@ resetLevel = ->
   @bot.showyi = @bot.yi = @initial_bot_location.yi
   @bot.showdir = @bot.dir = @initial_bot_location.dir
 
-
   @current_command = 0
 
   return
@@ -341,6 +375,7 @@ resetAndRunLevel = ->
   @mode = levelMode.PLAYING
   @last_t = Date.now()/1000
   @animation_mode = levelAnimMode.READY
+  delete @move_control
 
   return
 
@@ -353,33 +388,26 @@ lerp = (t, x0, x1) ->
 
 animateLevel = (t) ->
 
-  if @mode == levelMode.STOPPED
+  if @mode == levelMode.STOPPED or
+     (@mode == levelMode.PLAYING and @animation_mode == levelAnimMode.READY)
     @show_current_command = @current_command
     @bot.showxi = @bot.xi
     @bot.showyi = @bot.yi
     @bot.showdir = @bot.dir
 
+  if @mode == levelMode.STOPPED
     return
 
   dt = t - @last_t
 
-  # PLAYING or LIVE_EDIT
+  # PLAYING
 
   if @animation_mode == levelAnimMode.READY
     @show_current_command = @current_command
     next_move_control =
       start: (t: t, x: @bot.xi, y: @bot.yi, dir: @bot.dir)
       duration: 1/bot_speed
-    if not @step()
-
-      switch @mode
-        when levelMode.PLAYING
-          @mode = levelMode.LIVE_EDIT
-          @animation_mode = levelAnimMode.READY
-
-        #when levelMode.LIVE_EDIT keep waiting
-            
-    else
+    if @step()
       @move_control = next_move_control
       @animation_mode = levelAnimMode.MOVING
 
@@ -419,7 +447,7 @@ setupLevel = (initial_bot_location) ->
     animate: animateLevel
     step: stepLevelSimulation
 
-    mode: levelMode.LIVE_EDIT
+    mode: levelMode.PLAYING
     animation_mode: levelAnimMode.READY
 
     advanceCurrentCommand: -> @current_command++
@@ -430,7 +458,7 @@ setupLevel = (initial_bot_location) ->
 
 # control panel
 setupControlPanel = ->
-  buttons: [ play_button,
+  buttons: [ play_button, undo_button,
             go_up_button, go_down_button, go_left_button, go_right_button ]
   selected_button: null
   render: renderControlPanel
@@ -449,6 +477,8 @@ render = ->
 
   level_state.animate(t)
   level_state.render(level_ctx, prog_ctx)
+
+  #stop = true
   
   if !stop
     requestAnimationFrame(render)
