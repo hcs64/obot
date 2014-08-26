@@ -1,4 +1,5 @@
 level_cnv = document.getElementById('level')
+
 prog_cnv = document.getElementById('program')
 cont_cnv = document.getElementById('controls')
 
@@ -69,7 +70,7 @@ renderBot = (ctx) ->
   bp = bot_points
   ctx.save()
   ctx.translate((@showxi + .5) * cell_size, (@showyi + .5) * cell_size)
-  ctx.rotate(-@dir)
+  ctx.rotate(-@showdir)
 
   ctx.beginPath()
   ctx.moveTo(bp[0].x, bp[0].y)
@@ -221,7 +222,7 @@ renderPlayButton = (ctx) ->
   # reusing the bot graphic
   bp = bot_points
 
-  ctx.fillStyle = ctx.strokeStyle
+  #ctx.fillStyle = ctx.strokeStyle
 
   ctx.beginPath()
   ctx.moveTo(bp[0].x, bp[0].y)
@@ -229,7 +230,8 @@ renderPlayButton = (ctx) ->
   ctx.lineTo(bp[2].x, bp[2].y)
   ctx.closePath()
 
-  ctx.fill()
+  #ctx.fill()
+  ctx.stroke()
 
   return
 
@@ -271,15 +273,16 @@ empty_cmd =
 # buttons
 
 addCommandButtonAction = (level) ->
-  if level.mode == levelMode.STOPPED or
-     level.mode == levelMode.LIVE_EDIT
-    level.commands[level.current_command] = @cmd
-    level.advanceCurrentCommand()
+  switch level.mode
+    when levelMode.STOPPED
+      level.commands[level.current_command] = @cmd
+      level.advanceCurrentCommand()
+    when levelMode.LIVE_EDIT
+      level.commands[level.commands.length] = @cmd
 
   return
 
 playButtonAction = (level) ->
-  console.log("play!")
   level.resetAndRun()
   return
 
@@ -318,20 +321,28 @@ levelMode =
   LIVE_EDIT: 2
 
 levelAnimMode =
-  READY: 0  # ready to run the next command
-  MOVING: 1 # animating movement
-  DONE: 2   # end of the program
+  READY: 1  # ready to run the next command
+#  TURNING: 2  # animating turn
+  MOVING: 3 # animating movement
+  DONE: 4   # end of the program
 
-resetAndRunLevel = ->
-  @bot.xi = @initial_bot_location.xi
-  @bot.yi = @initial_bot_location.yi
-  @bot.dir = @initial_bot_location.dir
+resetLevel = ->
+  @bot.showxi = @bot.xi = @initial_bot_location.xi
+  @bot.showyi = @bot.yi = @initial_bot_location.yi
+  @bot.showdir = @bot.dir = @initial_bot_location.dir
+
 
   @current_command = 0
 
+  return
+
+resetAndRunLevel = ->
+  @reset()
   @mode = levelMode.PLAYING
   @last_t = Date.now()/1000
   @animation_mode = levelAnimMode.READY
+
+  return
 
 lerp = (t, x0, x1) ->
   if t < 0
@@ -346,35 +357,46 @@ animateLevel = (t) ->
     @show_current_command = @current_command
     @bot.showxi = @bot.xi
     @bot.showyi = @bot.yi
+    @bot.showdir = @bot.dir
 
     return
 
   dt = t - @last_t
 
-  switch @animation_mode
-    when levelAnimMode.READY
-      @show_current_command = @current_command
-      @move_control =
-        start: (t: t, x: @bot.xi, y: @bot.yi, dir: @bot.dir)
-        duration: 1/bot_speed
-      if not @step()
-        @animation_mode = levelAnimMode.DONE
-        @mode = levelMode.STOPPED
-      else
-        @animation_mode = levelAnimMode.MOVING
+  # PLAYING or LIVE_EDIT
 
-    when levelAnimMode.MOVING
-      rel_t = (t-@move_control.start.t)/@move_control.duration
-      @bot.showxi = lerp rel_t, @move_control.start.x, @bot.xi
-      @bot.showyi = lerp rel_t, @move_control.start.y, @bot.yi
+  if @animation_mode == levelAnimMode.READY
+    @show_current_command = @current_command
+    next_move_control =
+      start: (t: t, x: @bot.xi, y: @bot.yi, dir: @bot.dir)
+      duration: 1/bot_speed
+    if not @step()
 
-      if rel_t >= 1
-        @animation_mode = levelAnimMode.READY
+      switch @mode
+        when levelMode.PLAYING
+          @mode = levelMode.STOPPED
+          @animation_mode = levelAnimMode.DONE
+        #when levelMode.LIVE_EDIT keep waiting
+            
+    else
+      @move_control = next_move_control
+      @animation_mode = levelAnimMode.MOVING
+
+  # immediately run this if we switched to MOVING above
+  if @animation_mode == levelAnimMode.MOVING
+    rel_t = (t-@move_control.start.t)/@move_control.duration
+    @bot.showxi = lerp rel_t, @move_control.start.x, @bot.xi
+    @bot.showyi = lerp rel_t, @move_control.start.y, @bot.yi
+    @bot.showdir = @bot.dir
+
+    if rel_t >= 1
+      @animation_mode = levelAnimMode.READY
 
   @last_t = t
 
+  return
+
 stepLevelSimulation = ->
-  console.log("step, @current_command=" + @current_command)
 
   if @current_command != null && @current_command < @commands.length
     @commands[@current_command].action(this)
@@ -382,22 +404,28 @@ stepLevelSimulation = ->
     @advanceCurrentCommand()
 
     # TODO: limitations on movement
-    return true
+    true
   else
-    return false
+    false
 
-setupLevel = ->
-  initial_bot_location: (xi: 0, yi: 5, dir: 0)
-  bot: (showxi: 0, showyi: 0, xi: 0, yi: 0, render: renderBot, dir: 0)
-  commands: [ ]
-  current_command: 0
-  render: renderLevel
-  animate: animateLevel
-  step: stepLevelSimulation
+setupLevel = (initial_bot_location) ->
+  o =
+    initial_bot_location: initial_bot_location
+    bot: (render: renderBot)
+    commands: [ ]
+    current_command: 0
+    render: renderLevel
+    animate: animateLevel
+    step: stepLevelSimulation
 
-  mode: levelMode.STOPPED
-  advanceCurrentCommand: -> @current_command++
-  resetAndRun: resetAndRunLevel
+    mode: levelMode.LIVE_EDIT
+    animation_mode: levelAnimMode.READY
+
+    advanceCurrentCommand: -> @current_command++
+    reset: resetLevel
+    resetAndRun: resetAndRunLevel
+  o.reset()
+  o
 
 # control panel
 setupControlPanel = ->
@@ -408,7 +436,7 @@ setupControlPanel = ->
   click: clickControlPanel
 
 control_panel = setupControlPanel()
-level_state = setupLevel()
+level_state = setupLevel((xi:0, yi:5, dir:0))
 
 stop = false
 
