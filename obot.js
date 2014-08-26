@@ -27,13 +27,13 @@
     ctx.save();
     ctx.lineWidth = .5;
     ctx.strokeStyle = 'white';
-    for (xi = _i = 1; _i <= 10; xi = ++_i) {
+    for (xi = _i = 1; _i < 10; xi = ++_i) {
       ctx.beginPath();
       ctx.moveTo(xi * 32 + .5, 0);
-      ctx.lineTo(xi * 32 + .5, 256);
+      ctx.lineTo(xi * 32 + .5, 320);
       ctx.stroke();
     }
-    for (yi = _j = 1; _j <= 10; yi = ++_j) {
+    for (yi = _j = 1; _j < 10; yi = ++_j) {
       ctx.beginPath();
       ctx.moveTo(0, yi * 32 + .5);
       ctx.lineTo(320, yi * 32 + .5);
