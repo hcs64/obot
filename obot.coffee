@@ -277,7 +277,7 @@ addCommandButtonAction = (level) ->
     when levelMode.STOPPED
       level.commands[level.current_command] = @cmd
       level.advanceCurrentCommand()
-    when levelMode.LIVE_EDIT
+    when levelMode.LIVE_EDIT, levelMode.PLAYING
       level.commands[level.commands.length] = @cmd
 
   return
@@ -374,8 +374,9 @@ animateLevel = (t) ->
 
       switch @mode
         when levelMode.PLAYING
-          @mode = levelMode.STOPPED
-          @animation_mode = levelAnimMode.DONE
+          @mode = levelMode.LIVE_EDIT
+          @animation_mode = levelAnimMode.READY
+
         #when levelMode.LIVE_EDIT keep waiting
             
     else
