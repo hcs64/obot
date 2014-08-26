@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Obligatory robot game</title>
+<script src="util.js"></script>
+
+<style>
+div.ob {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  line-height: 0;
+}
+div.ob canvas {
+  border: 1px solid white;
+  margin: 2px;
+  padding: 0;
+}
+
+</style>
+</head>
+
+<body style="background-color:black">
+<div style="float:left" class="ob">
+  <canvas id="controls" width="80" height="342"></canvas>
+</div>
+<div class="ob">
+  <canvas id="level" width="320" height="256"></canvas>
+</div>
+<div class="ob">
+  <canvas id="program" width="320" height="80"></canvas>
+</div>
+
+<script src="obot.js"></script>
+
+</script>
+</body>
+</html>
