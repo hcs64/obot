@@ -21,13 +21,13 @@ renderLevel = (level_ctx, prog_ctx) ->
   ctx.lineWidth = .5
   ctx.strokeStyle = 'white'
 
-  for xi in [1..10]
+  for xi in [1...10]
     ctx.beginPath()
     ctx.moveTo(xi*32+.5,0)
-    ctx.lineTo(xi*32+.5,256)
+    ctx.lineTo(xi*32+.5,320)
     ctx.stroke()
 
-  for yi in [1..10]
+  for yi in [1...10]
     ctx.beginPath()
     ctx.moveTo(0,yi*32+.5)
     ctx.lineTo(320,yi*32+.5)
