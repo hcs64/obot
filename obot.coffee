@@ -236,23 +236,13 @@ renderPlayButton = (ctx) ->
   return
 
 renderUndoButton = (ctx) ->
-  ics = inner_control_size
+  ics = inner_control_size*.35
   ctx.beginPath()
-  ctx.arc(0,0,ics*.3, -Math.PI/8, Math.PI/8, true)
 
-  arrowEnd =
-    x: Math.cos(-Math.PI/8)*ics*.3
-    y:-Math.sin(-Math.PI/8)*ics*.3
-  innerArrow =
-    x: arrowEnd.x + Math.cos(Math.PI*(1-1/8+.125))*ics*.3*.5
-    y: arrowEnd.y - Math.sin(Math.PI*(1-1/8+.125))*ics*.3*.5
-  outerArrow =
-    x: arrowEnd.x + Math.cos(Math.PI*(-1/8-.3))*ics*.3*.5
-    y: arrowEnd.y - Math.sin(Math.PI*(-1/8-.3))*ics*.3*.5
-
-  ctx.lineTo(innerArrow.x, innerArrow.y)
-  ctx.moveTo(arrowEnd.x, arrowEnd.y)
-  ctx.lineTo(outerArrow.x, outerArrow.y)
+  ctx.moveTo(-ics,-ics)
+  ctx.lineTo(ics,ics)
+  ctx.moveTo(-ics,ics)
+  ctx.lineTo(ics,-ics)
 
   ctx.stroke()
   return
