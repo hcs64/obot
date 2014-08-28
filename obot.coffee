@@ -1,10 +1,11 @@
 ###
-Interface rules (not yet implemented):
+Interface rules
 
 0. Initially in mode STOP
 
 1. If you click a command, the command should be added to the list
 STOP: enter mode PLAY
+STOPDONE: reset and enter mode PLAY
 
 exception A: not during TURNAROUND or PLAYREV
 exception B: list is full, show error sparks on command list
@@ -16,11 +17,11 @@ exception B: list is full, show error sparks on command list
 
 4. At the start of a command cycle
 PLAY: advance to next command, if no more commands, STOP
-STOP: nothing
+STOP, STOPDONE: nothing
 PLAYFWD: advance to next command, if no commands, STOP,
          if no more commands (and any commands), TURNAROUND
 TURNAROUND: PLAYREV
-PLAYREV: advance to previous command, if no more commands, STOP
+PLAYREV: advance to previous command, if no more commands, STOPDONE
 
 5. @show_current_command is the currently executing command (i.e. the command
    currently animating), this is the highlighted command
@@ -471,6 +472,7 @@ resetLevel = ->
   @bot.showxi = @bot.xi = @initial_bot_location.xi
   @bot.showyi = @bot.yi = @initial_bot_location.yi
   @bot.showdir = @bot.dir = @initial_bot_location.dir
+  @bot.has_item = false
 
   @show_current_command = 0
   @next_command = 0
@@ -561,6 +563,10 @@ stepLevelSimulation = ->
   if @mode == levelMode.TURNAROUND
     # NOTE: even TURNAROUND might fail if something hits you
     return true
+
+  # bot gets item when leaving its cell
+  if @bot.xi == @item_location.xi and @bot.yi == @item_location.yi
+    @bot.has_item = true
 
   @commands[@next_command].action(this)
   @advanceNextCommand()
