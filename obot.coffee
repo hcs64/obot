@@ -1,3 +1,39 @@
+###
+Interface rules (not yet implemented):
+
+0. Initially in mode STOP
+
+1. If you click a command, the command should be added to the list
+STOP: enter mode PLAY
+
+exception A: not during TURNAROUND or PLAYREV
+exception B: list is full, show error sparks on command list
+
+2. If you click play, playback should reset and enter mode PLAYFWD
+
+3. If you click undo, last command should be removed from the list,
+   playback reset and fast-forwarded to the new last command, enter mode STOP
+
+4. At the start of a command cycle
+PLAY: advance to next command, if no more commands, STOP
+STOP: nothing
+PLAYFWD: advance to next command, if no commands, STOP,
+         if no more commands (and any commands), TURNAROUND
+TURNAROUND: PLAYREV
+PLAYREV: advance to previous command, if no more commands, STOP
+
+5. @show_current_command is the currently executing command (i.e. the command
+   currently animating), this is the highlighted command
+5a. @show_current_command is set to the length of the commands array (an
+   invalid command index) when in TURNAROUND
+
+6. @next_command is the next command to be run, once it is run increment it. It
+   is the length of the total array (invalid index) when no more commands are
+   left to be executed in PLAY or PLAYFWD, respectively -1 in PLAYREV
+
+###
+
+
 level_cnv = document.getElementById('level')
 
 prog_cnv = document.getElementById('program')
@@ -50,7 +86,7 @@ renderLevel = (level_ctx, prog_ctx) ->
   ctx.restore()
 
   # item
-  @bot.has_item = true
+  #@bot.has_item = true
   if !@bot.has_item
     ctx.translate( (@item_location.xi+.5)*cell_size,
                    (@item_location.yi+.5)*cell_size)
@@ -71,23 +107,23 @@ renderLevel = (level_ctx, prog_ctx) ->
   for cmd, i in @commands
     col = i
 
-    cur = (@show_current_command? and i == @show_current_command)
+    cur = i == @show_current_command
     row = 0
     renderCommand(ctx, cmd, (x: col*command_size, y: row*command_size),
       cur and (
-        @mode == levelMode.FULLPLAYING or
-        @mode == levelMode.TURNAROUND), false)
+        @mode == levelMode.PLAY or
+        @mode == levelMode.PLAYFWD), false)
 
-    cur = (@show_current_command? and i == @show_current_command)
+    cur = i == @show_current_command
     row = 1
     renderCommand(ctx, cmd, (x: col*command_size, y: row*command_size),
-      cur and @mode == levelMode.REVPLAYING, true)
+      cur and @mode == levelMode.PLAYREV, true)
 
   if @commands.length > 0
     renderCommand(ctx, reverse_cmd,
       (x: @commands.length*command_size, y: .5*command_size),
-      @show_current_command? and @commands.length == @show_current_command and
-      @mode == levelMode.REVPLAYING)
+      @commands.length == @show_current_command and
+      @mode == levelMode.TURNAROUND)
 
   return
 
@@ -294,11 +330,11 @@ renderUndoButton = (ctx) ->
 # stepLevelSimulation?
 moveCommand = (level) ->
   switch level.mode
-    when levelMode.PLAYING, levelMode.FULLPLAYING
+    when levelMode.PLAY, levelMode.PLAYFWD
       level.bot.xi += @dir.dx
       level.bot.yi += @dir.dy
       level.bot.dir = @dir.theta
-    when levelMode.REVPLAYING
+    when levelMode.PLAYREV
       dir = reverseDir(@dir)
       level.bot.xi += dir.dx
       level.bot.yi += dir.dy
@@ -354,21 +390,26 @@ reverse_cmd =
 max_commands = 9
 
 addCommandButtonAction = (level) ->
+  if level.mode == levelMode.TURNAROUND || level.mode == levelMode.PLAYREV
+    return false
   if level.commands.length >= max_commands
+    # TODO: display error
     return false
 
-  switch level.mode
-    when levelMode.PLAYING, levelMode.FULLPLAYING
-      level.commands[level.commands.length] = @cmd
-    when levelMode.REVPLAYING, levelMode.TURNAROUND
-      level.reset()
-      level.commands[level.commands.length] = @cmd
+  level.commands[level.commands.length] = @cmd
 
-  true
+  if level.mode == levelMode.STOPDONE
+    level.reset()
+  if level.mode == levelMode.STOP
+    level.mode = levelMode.PLAY
+    level.animation_mode = levelAnimMode.READY
+    level.last_t = Date.now()/1000
+
+  return true
 
 playButtonAction = (level) ->
   level.resetAndRun()
-  level.mode = levelMode.FULLPLAYING
+  level.mode = levelMode.PLAYFWD
   return
 
 undoButtonAction = (level) ->
@@ -377,15 +418,11 @@ undoButtonAction = (level) ->
 
   level.commands = level.commands[...-1]
 
-  if level.mode == levelMode.STOP
-    level.reset()
-    return true
+  level.resetAndRun()
+  while level.next_command < level.commands.length && level.step()
+    true
 
-  if level.current_command >= level.commands.length or
-     level.mode != levelMode.PLAYING
-    level.resetAndRun()
-    while level.step()
-      true
+  level.mode = levelMode.STOP
 
 arrowButtonRender = (ctx) ->
   renderArrow(ctx, @dir.theta, inner_control_size)
@@ -420,30 +457,31 @@ undo_button =
 # level
 
 levelMode =
-  PLAYING: 2
-  FULLPLAYING: 3
+  STOP: 1
+  PLAY: 2
+  PLAYFWD: 3
   TURNAROUND: 4
-  REVPLAYING: 5
+  PLAYREV: 5
 
 levelAnimMode =
   READY: 1  # ready to run the next command
-#  TURNING: 2  # animating turn
-  MOVING: 3 # animating movement
-  DONE: 4   # end of the program
+  MOVING: 2 # animating movement
 
 resetLevel = ->
   @bot.showxi = @bot.xi = @initial_bot_location.xi
   @bot.showyi = @bot.yi = @initial_bot_location.yi
   @bot.showdir = @bot.dir = @initial_bot_location.dir
 
-  @mode = levelMode.PLAYING
-  @current_command = 0
+  @show_current_command = 0
+  @next_command = 0
+
+  @mode = levelMode.STOP
 
   return
 
 resetAndRunLevel = ->
   @reset()
-  @mode = levelMode.PLAYING
+  @mode = levelMode.PLAYFWD
   @last_t = Date.now()/1000
   @animation_mode = levelAnimMode.READY
   delete @move_control
@@ -461,20 +499,48 @@ animateLevel = (t) ->
   #console.log("mode = " + @mode + " animMode = " + @animation_mode)
 
   if @animation_mode == levelAnimMode.READY
-    if @mode == levelMode.PLAYING
-      @show_current_command = null
-    else
-      @show_current_command = @current_command
+    step_ok = false
+
+    switch @mode
+      when levelMode.PLAY
+        if @next_command < @commands.length
+          step_ok = true
+        else
+          @mode = levelMode.STOP
+
+      when levelMode.PLAYFWD
+        if @next_command < @commands.length
+          step_ok = true
+        else if @commands.length > 0
+          @mode = levelMode.TURNAROUND
+          step_ok = true
+        else
+          @mode = levelMode.STOP
+
+      when levelMode.TURNAROUND
+        @next_command = @commands.length-1
+        @mode = levelMode.PLAYREV
+
+      when levelMode.PLAYREV
+        if @next_command >= 0
+          step_ok = true
+        else
+          @mode = levelMode.STOPDONE
+
     @bot.showxi = @bot.xi
     @bot.showyi = @bot.yi
     @bot.showdir = @bot.dir
 
-    next_move_control =
-      start: (t: t, x: @bot.xi, y: @bot.yi, dir: @bot.dir)
-      duration: 1/bot_speed
-    if @step()
-      @move_control = next_move_control
-      @animation_mode = levelAnimMode.MOVING
+    if step_ok
+      step_command = @next_command
+
+      next_move_control =
+        start: (t: t, x: @bot.xi, y: @bot.yi, dir: @bot.dir)
+        duration: 1/bot_speed
+      if @step()
+        @move_control = next_move_control
+        @animation_mode = levelAnimMode.MOVING
+        @show_current_command = step_command
 
   # immediately run this if we switched to MOVING above
   if @animation_mode == levelAnimMode.MOVING
@@ -491,28 +557,15 @@ animateLevel = (t) ->
   return
 
 stepLevelSimulation = ->
-  if @commands.length == 0 and @mode == levelMode.FULLPLAYING
-    @mode = levelMode.PLAYING
-
-  if @current_command != null &&
-     @current_command >= 0 &&
-     @current_command < @commands.length
-    # TODO: errors for bad movement
-    @commands[@current_command].action(this)
-
-    @advanceCurrentCommand()
-
-    if @mode == levelMode.FULLPLAYING &&
-       @current_command == @commands.length
-      @mode = levelMode.TURNAROUND
+  # TODO: detect illegal moves (obstacles), show error
+  if @mode == levelMode.TURNAROUND
+    # NOTE: even TURNAROUND might fail if something hits you
     return true
-  else if @mode == levelMode.TURNAROUND
-    @mode = levelMode.REVPLAYING
-    @advanceCurrentCommand()
-    return true
-  else
-    return false
 
+  @commands[@next_command].action(this)
+  @advanceNextCommand()
+
+  return true
 
 setupLevel = (initial_bot_location, item_location) ->
   o =
@@ -520,20 +573,18 @@ setupLevel = (initial_bot_location, item_location) ->
     item_location: item_location
     bot: (render: renderBot)
     commands: [ ]
-    current_command: 0
+    next_command: 0
+    show_current_command: -1
     render: renderLevel
     animate: animateLevel
     step: stepLevelSimulation
 
-    mode: levelMode.PLAYING
-    animation_mode: levelAnimMode.READY
-
-    advanceCurrentCommand: ->
+    advanceNextCommand: ->
       switch @mode
-        when levelMode.PLAYING, levelMode.FULLPLAYING
-          @current_command++
-        when levelMode.REVPLAYING
-          @current_command--
+        when levelMode.PLAY, levelMode.PLAYFWD
+          @next_command++
+        when levelMode.PLAYREV
+          @next_command--
     reset: resetLevel
     resetAndRun: resetAndRunLevel
   o.reset()
