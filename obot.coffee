@@ -50,7 +50,7 @@ clear = (cnv, ctx) ->
 
 # level graphics
 cell_size = 32
-renderLevel = (level_ctx, prog_ctx) ->
+renderLevel = (level_ctx, prog_ctx, t) ->
   ctx = level_ctx
   ctx.save()
 
@@ -99,6 +99,14 @@ renderLevel = (level_ctx, prog_ctx) ->
   ctx.stroke()
   ctx.restore()
 
+  # obstacles
+  show_frame = @frame
+  frame_t = 0
+  if @animation_mode == levelAnimMode.MOVING
+    frame_t = (t - @move_control.start.t) * bot_speed
+    show_frame = @frame - 1
+  for o in @obstacles
+    o.render(ctx, show_frame, frame_t, t)
 
   # bot
   @bot.render(ctx)
@@ -168,6 +176,31 @@ renderBot = (ctx) ->
 
   return
 
+# obstacle graphics
+renderMine = (ctx) ->
+    ctx.fillStyle = 'black'
+    ctx.strokeStyle = 'white'
+    ctx.lineWidth = 1
+
+    ctx.beginPath()
+    ctx.moveTo(-cell_size*.35,-cell_size*.35)
+    ctx.lineTo(cell_size*.35,cell_size*.35)
+    ctx.moveTo(cell_size*.35,-cell_size*.35)
+    ctx.lineTo(-cell_size*.35,cell_size*.35)
+
+    ctx.moveTo(0,-cell_size*.4)
+    ctx.lineTo(0,cell_size*.4)
+    ctx.moveTo(cell_size*.4,0)
+    ctx.lineTo(-cell_size*.4,0)
+    ctx.stroke()
+
+    ctx.beginPath()
+    ctx.arc(0,0, cell_size*.3, 0, Math.PI*2)
+    ctx.fill()
+    ctx.stroke()
+
+    return
+ 
 # general directions
 UP = (theta: Math.PI/2, dx: 0, dy: -1)
 LEFT = (theta: Math.PI, dx: -1, dy: 0)
@@ -455,7 +488,43 @@ undo_button =
   render: renderUndoButton
   action: undoButtonAction
 
-# level
+# obstacles
+class Static_obstacle
+  constructor: (@xi, @yi) ->
+
+  render: (ctx, frame, frame_t, t) ->
+    ctx.save()
+    ctx.translate((@xi + .5)*cell_size+.5, (@yi + .5)*cell_size+.5)
+
+    renderMine(ctx)
+    ctx.restore()
+    return
+
+  isHit: (xi, yi, frame) ->
+    return xi == @xi and yi == @yi
+
+class Mobile_obstacle
+  constructor: (@xi, @yi, @dxi, @dyi) ->
+
+  render: (ctx, frame, frame_t, t) ->
+    distx = (frame + frame_t) * @dxi
+    disty = (frame + frame_t) * @dyi
+
+    ctx.save()
+
+    ctx.translate((@xi + .5 + distx)*cell_size+.5,
+                  (@yi + .5 + disty)*cell_size+.5)
+
+    renderMine(ctx)
+    ctx.restore()
+    return
+
+  isHit: (xi, yi, frame) ->
+    # NOTE: if the obstacle is to move more than one cell per frame in some
+    # direction, this check will need to be expanded
+    return xi == @xi+frame*@dxi and yi == @yi+frame*@dyi
+
+# level logic
 
 levelMode =
   STOP: 1
@@ -476,17 +545,19 @@ resetLevel = ->
 
   @show_current_command = 0
   @next_command = 0
+  @frame = 0
 
   @mode = levelMode.STOP
+
+  @animation_mode = levelAnimMode.READY
+  delete @move_control
+  @last_t = Date.now()/1000
 
   return
 
 resetAndRunLevel = ->
   @reset()
   @mode = levelMode.PLAYFWD
-  @last_t = Date.now()/1000
-  @animation_mode = levelAnimMode.READY
-  delete @move_control
 
   return
 
@@ -543,6 +614,8 @@ animateLevel = (t) ->
         @move_control = next_move_control
         @animation_mode = levelAnimMode.MOVING
         @show_current_command = step_command
+      else
+        # TODO: Need to play a death animation and restart
 
   # immediately run this if we switched to MOVING above
   if @animation_mode == levelAnimMode.MOVING
@@ -559,24 +632,31 @@ animateLevel = (t) ->
   return
 
 stepLevelSimulation = ->
-  # TODO: detect illegal moves (obstacles), show error
-  if @mode == levelMode.TURNAROUND
-    # NOTE: even TURNAROUND might fail if something hits you
-    return true
-
   # bot gets item when leaving its cell
   if @bot.xi == @item_location.xi and @bot.yi == @item_location.yi
     @bot.has_item = true
 
-  @commands[@next_command].action(this)
+  if @mode isnt levelMode.TURNAROUND # @next_command is illegal for TURNAROUND
+    @commands[@next_command].action(this)
+
+  @frame++
+
+  # check if this move takes us into an obstacle
+  for o in @obstacles
+    if o.isHit(@bot.xi, @bot.yi, @frame)
+      console.log("hit obstacle at frame " + @frame)
+      # TODO: error display, take back move (I think that goes elsewhere)
+      #return false
+
   @advanceNextCommand()
 
   return true
 
-setupLevel = (initial_bot_location, item_location) ->
+setupLevel = (initial_bot_location, item_location, obstacles) ->
   o =
     initial_bot_location: initial_bot_location
     item_location: item_location
+    obstacles: obstacles
     bot: (render: renderBot)
     commands: [ ]
     next_command: 0
@@ -605,7 +685,11 @@ setupControlPanel = ->
   click: clickControlPanel
 
 control_panel = setupControlPanel()
-level_state = setupLevel((xi:0, yi:5, dir:0), (xi:6, yi:5))
+level_state = setupLevel(
+  (xi:0, yi:5, dir:0), (xi:6, yi:5),
+  [new Static_obstacle(1,5),
+   new Mobile_obstacle(2,1,0,1)]
+  )
 
 stop = false
 
@@ -616,7 +700,7 @@ render = ->
   clear(prog_cnv, prog_ctx)
 
   level_state.animate(t)
-  level_state.render(level_ctx, prog_ctx)
+  level_state.render(level_ctx, prog_ctx, t)
 
   #stop = true
   
