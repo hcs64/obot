@@ -35,23 +35,59 @@ renderLevel = (level_ctx, prog_ctx) ->
 
   ctx.restore()
 
+  # goal
+  ctx.save()
+  ctx.lineWidth = 1.5
+  ctx.strokeStyle = 'white'
+  ctx.save()
+
+  ctx.translate(
+    (@initial_bot_location.xi+.5) * cell_size,
+    (@initial_bot_location.yi+.5) * cell_size)
+  ctx.beginPath()
+  ctx.arc(0, 0, cell_size*.4, 0, Math.PI)
+  ctx.stroke()
+  ctx.restore()
+
+  # item
+  @bot.has_item = true
+  if !@bot.has_item
+    ctx.translate( (@item_location.xi+.5)*cell_size,
+                   (@item_location.yi+.5)*cell_size)
+  else
+    ctx.translate( (@bot.showxi+.5)*cell_size,
+                   (@bot.showyi+.5)*cell_size)
+  ctx.beginPath()
+  ctx.arc(0,0,cell_size*.4,0,Math.PI,true)
+  ctx.stroke()
+  ctx.restore()
+
+
   # bot
   @bot.render(ctx)
 
   # commands
   ctx = prog_ctx
   for cmd, i in @commands
-    row = i // commands_per_row
-    col = i % commands_per_row
-    renderCommand(ctx, cmd, (x: col*command_size, y: row*command_size),
-      (@show_current_command? and i == @show_current_command))
+    col = i
 
-  # artificial current_command if we don't have an existing command selected
-  if @show_current_command != null && @show_current_command >= @commands.length
-    row = @commands.length // commands_per_row
-    col = @commands.length % commands_per_row
-    renderCommand(ctx, empty_cmd, (x: col*command_size, y: row*command_size),
-      true)
+    cur = (@show_current_command? and i == @show_current_command)
+    row = 0
+    renderCommand(ctx, cmd, (x: col*command_size, y: row*command_size),
+      cur and (
+        @mode == levelMode.FULLPLAYING or
+        @mode == levelMode.TURNAROUND), false)
+
+    cur = (@show_current_command? and i == @show_current_command)
+    row = 1
+    renderCommand(ctx, cmd, (x: col*command_size, y: row*command_size),
+      cur and @mode == levelMode.REVPLAYING, true)
+
+  if @commands.length > 0
+    renderCommand(ctx, reverse_cmd,
+      (x: @commands.length*command_size, y: .5*command_size),
+      @show_current_command? and @commands.length == @show_current_command and
+      @mode == levelMode.REVPLAYING)
 
   return
 
@@ -129,9 +165,8 @@ renderArrow  = (ctx, dir, size) ->
   return
 
 # command graphics
-command_size = 38
+command_size = 32
 inner_command_size = 29
-commands_per_row = 8
 command_scrim_points = do ->
   ics = inner_command_size
   [
@@ -141,7 +176,7 @@ command_scrim_points = do ->
     (x: +ics/2, y: -ics/2)
   ]
 
-renderCommand = (ctx, what, where, current=false) ->
+renderCommand = (ctx, what, where, current, rev = false) ->
   cs = command_size
   ics = inner_command_size
 
@@ -159,7 +194,7 @@ renderCommand = (ctx, what, where, current=false) ->
     for pt in command_scrim_points
       ctx.fillRect(pt.x-ics*.1, pt.y-ics*.1, ics*.2, ics*.2)
  
-  what.render(ctx)
+  what.render(ctx, rev)
   ctx.restore()
 
   return
@@ -272,8 +307,10 @@ moveCommand = (level) ->
 noActionCommand = (level) ->
   return
 
-arrowCommandRender = (ctx) ->
-  renderArrow(ctx, @dir.theta, inner_command_size)
+arrowCommandRender = (ctx, rev) ->
+  ics = inner_command_size * if rev then -1 else 1
+
+  renderArrow(ctx, @dir.theta, ics)
 
 reverseCommandRender = (ctx) ->
   ics  = inner_command_size
@@ -309,22 +346,18 @@ down_arrow_cmd =
   dir: DOWN
   action: moveCommand
 
-empty_cmd =
-  render: -> return
-  action: noActionCommand
+reverse_cmd =
+  render: reverseCommandRender
 
 # buttons
 
-max_commands = 8
+max_commands = 9
 
 addCommandButtonAction = (level) ->
   if level.commands.length >= max_commands
     return false
 
   switch level.mode
-    when levelMode.STOPPED
-      level.commands[level.current_command] = @cmd
-      level.advanceCurrentCommand()
     when levelMode.PLAYING, levelMode.FULLPLAYING
       level.commands[level.commands.length] = @cmd
     when levelMode.REVPLAYING, levelMode.TURNAROUND
@@ -387,7 +420,6 @@ undo_button =
 # level
 
 levelMode =
-  STOPPED: 1
   PLAYING: 2
   FULLPLAYING: 3
   TURNAROUND: 4
@@ -426,19 +458,17 @@ lerp = (t, x0, x1) ->
   (x1-x0)*t + x0
 
 animateLevel = (t) ->
-  console.log("mode = " + @mode + " animMode = " + @animation_mode)
+  #console.log("mode = " + @mode + " animMode = " + @animation_mode)
 
-  if @mode == levelMode.STOPPED or @animation_mode == levelAnimMode.READY
-    @show_current_command = @current_command
+  if @animation_mode == levelAnimMode.READY
+    if @mode == levelMode.PLAYING
+      @show_current_command = null
+    else
+      @show_current_command = @current_command
     @bot.showxi = @bot.xi
     @bot.showyi = @bot.yi
     @bot.showdir = @bot.dir
 
-  if @mode == levelMode.STOPPED
-    return
-
-  if @animation_mode == levelAnimMode.READY
-    @show_current_command = @current_command
     next_move_control =
       start: (t: t, x: @bot.xi, y: @bot.yi, dir: @bot.dir)
       duration: 1/bot_speed
@@ -475,18 +505,19 @@ stepLevelSimulation = ->
     if @mode == levelMode.FULLPLAYING &&
        @current_command == @commands.length
       @mode = levelMode.TURNAROUND
-    true
+    return true
   else if @mode == levelMode.TURNAROUND
     @mode = levelMode.REVPLAYING
     @advanceCurrentCommand()
     return true
   else
-    false
+    return false
 
 
-setupLevel = (initial_bot_location) ->
+setupLevel = (initial_bot_location, item_location) ->
   o =
     initial_bot_location: initial_bot_location
+    item_location: item_location
     bot: (render: renderBot)
     commands: [ ]
     current_command: 0
@@ -517,7 +548,7 @@ setupControlPanel = ->
   click: clickControlPanel
 
 control_panel = setupControlPanel()
-level_state = setupLevel((xi:0, yi:5, dir:0))
+level_state = setupLevel((xi:0, yi:5, dir:0), (xi:6, yi:5))
 
 stop = false
 
