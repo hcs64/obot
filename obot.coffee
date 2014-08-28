@@ -101,6 +101,17 @@ LEFT = (theta: Math.PI, dx: -1, dy: 0)
 RIGHT = (theta: 0, dx: 1, dy: 0)
 DOWN = (theta: -Math.PI/2, dx: 0, dy: 1)
 
+reverseDir = (dir) ->
+  switch dir
+    when UP
+      return DOWN
+    when DOWN
+      return UP
+    when LEFT
+      return RIGHT
+    when RIGHT
+      return LEFT
+
 renderArrow  = (ctx, dir, size) ->
   as = size*.75  # arrow size
   ahs = size*.2 # arrowhead size
@@ -219,10 +230,8 @@ renderButtonScrim = (ctx) ->
   return
 
 renderPlayButton = (ctx) ->
-  # reusing the bot graphic
+  # reusing the bot triangle
   bp = bot_points
-
-  #ctx.fillStyle = ctx.strokeStyle
 
   ctx.beginPath()
   ctx.moveTo(bp[0].x, bp[0].y)
@@ -230,7 +239,6 @@ renderPlayButton = (ctx) ->
   ctx.lineTo(bp[2].x, bp[2].y)
   ctx.closePath()
 
-  #ctx.fill()
   ctx.stroke()
 
   return
@@ -250,15 +258,39 @@ renderUndoButton = (ctx) ->
 # TODO: these should handle the passage of time? or maybe that is up to
 # stepLevelSimulation?
 moveCommand = (level) ->
-  level.bot.xi += @dir.dx
-  level.bot.yi += @dir.dy
-  level.bot.dir = @dir.theta
+  switch level.mode
+    when levelMode.PLAYING, levelMode.FULLPLAYING
+      level.bot.xi += @dir.dx
+      level.bot.yi += @dir.dy
+      level.bot.dir = @dir.theta
+    when levelMode.REVPLAYING
+      dir = reverseDir(@dir)
+      level.bot.xi += dir.dx
+      level.bot.yi += dir.dy
+      level.bot.dir = dir.theta
 
 noActionCommand = (level) ->
   return
 
 arrowCommandRender = (ctx) ->
   renderArrow(ctx, @dir.theta, inner_command_size)
+
+reverseCommandRender = (ctx) ->
+  ics  = inner_command_size
+
+  ctx.beginPath()
+  ctx.moveTo(-ics*.2, -ics*.3)
+  ctx.lineTo(0, -ics*.3)
+  ctx.arc(0,0,ics*.3, -Math.PI/2, Math.PI/2, false)
+
+  ctx.lineTo(-ics*.2, ics*.3)
+  ctx.lineTo(-ics*.1, ics*.15)
+  ctx.moveTo(-ics*.2, ics*.3)
+  ctx.lineTo(-ics*.1, ics*.45)
+
+  ctx.stroke()
+
+  return
 
 up_arrow_cmd =
   render: arrowCommandRender
@@ -283,18 +315,27 @@ empty_cmd =
 
 # buttons
 
+max_commands = 8
+
 addCommandButtonAction = (level) ->
+  if level.commands.length >= max_commands
+    return false
+
   switch level.mode
     when levelMode.STOPPED
       level.commands[level.current_command] = @cmd
       level.advanceCurrentCommand()
-    when levelMode.PLAYING
+    when levelMode.PLAYING, levelMode.FULLPLAYING
+      level.commands[level.commands.length] = @cmd
+    when levelMode.REVPLAYING, levelMode.TURNAROUND
+      level.reset()
       level.commands[level.commands.length] = @cmd
 
-  return
+  true
 
 playButtonAction = (level) ->
   level.resetAndRun()
+  level.mode = levelMode.FULLPLAYING
   return
 
 undoButtonAction = (level) ->
@@ -303,11 +344,15 @@ undoButtonAction = (level) ->
 
   level.commands = level.commands[...-1]
 
-  if level.current_command >= level.commands.length
+  if level.mode == levelMode.STOP
+    level.reset()
+    return true
+
+  if level.current_command >= level.commands.length or
+     level.mode != levelMode.PLAYING
     level.resetAndRun()
     while level.step()
       true
-
 
 arrowButtonRender = (ctx) ->
   renderArrow(ctx, @dir.theta, inner_control_size)
@@ -344,6 +389,9 @@ undo_button =
 levelMode =
   STOPPED: 1
   PLAYING: 2
+  FULLPLAYING: 3
+  TURNAROUND: 4
+  REVPLAYING: 5
 
 levelAnimMode =
   READY: 1  # ready to run the next command
@@ -356,6 +404,7 @@ resetLevel = ->
   @bot.showyi = @bot.yi = @initial_bot_location.yi
   @bot.showdir = @bot.dir = @initial_bot_location.dir
 
+  @mode = levelMode.PLAYING
   @current_command = 0
 
   return
@@ -377,9 +426,9 @@ lerp = (t, x0, x1) ->
   (x1-x0)*t + x0
 
 animateLevel = (t) ->
+  console.log("mode = " + @mode + " animMode = " + @animation_mode)
 
-  if @mode == levelMode.STOPPED or
-     (@mode == levelMode.PLAYING and @animation_mode == levelAnimMode.READY)
+  if @mode == levelMode.STOPPED or @animation_mode == levelAnimMode.READY
     @show_current_command = @current_command
     @bot.showxi = @bot.xi
     @bot.showyi = @bot.yi
@@ -387,10 +436,6 @@ animateLevel = (t) ->
 
   if @mode == levelMode.STOPPED
     return
-
-  dt = t - @last_t
-
-  # PLAYING
 
   if @animation_mode == levelAnimMode.READY
     @show_current_command = @current_command
@@ -416,16 +461,28 @@ animateLevel = (t) ->
   return
 
 stepLevelSimulation = ->
+  if @commands.length == 0 and @mode == levelMode.FULLPLAYING
+    @mode = levelMode.PLAYING
 
-  if @current_command != null && @current_command < @commands.length
+  if @current_command != null &&
+     @current_command >= 0 &&
+     @current_command < @commands.length
+    # TODO: errors for bad movement
     @commands[@current_command].action(this)
 
     @advanceCurrentCommand()
 
-    # TODO: limitations on movement
+    if @mode == levelMode.FULLPLAYING &&
+       @current_command == @commands.length
+      @mode = levelMode.TURNAROUND
     true
+  else if @mode == levelMode.TURNAROUND
+    @mode = levelMode.REVPLAYING
+    @advanceCurrentCommand()
+    return true
   else
     false
+
 
 setupLevel = (initial_bot_location) ->
   o =
@@ -440,7 +497,12 @@ setupLevel = (initial_bot_location) ->
     mode: levelMode.PLAYING
     animation_mode: levelAnimMode.READY
 
-    advanceCurrentCommand: -> @current_command++
+    advanceCurrentCommand: ->
+      switch @mode
+        when levelMode.PLAYING, levelMode.FULLPLAYING
+          @current_command++
+        when levelMode.REVPLAYING
+          @current_command--
     reset: resetLevel
     resetAndRun: resetAndRunLevel
   o.reset()
