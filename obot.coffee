@@ -34,6 +34,10 @@ PLAYREV: advance to previous command, if no more commands, STOPDONE
 
 ###
 
+###
+How does death work?
+just reset after animation
+###
 
 level_cnv = document.getElementById('level')
 
@@ -109,7 +113,12 @@ renderLevel = (level_ctx, prog_ctx, t) ->
     o.render(ctx, show_frame, frame_t, t)
 
   # bot
-  @bot.render(ctx)
+  @bot.render(ctx,
+    if @animation_mode == levelAnimMode.DYING
+      (t - @move_control.start.t) * bot_speed
+    else
+      0
+  )
 
   # commands
   ctx = prog_ctx
@@ -147,7 +156,7 @@ bot_points = [
   (x: -bot_size * (hr3-rr3), y: bot_size/2)
 ]
 
-renderBot = (ctx) ->
+renderBot = (ctx, dying) ->
   bp = bot_points
   ctx.save()
   ctx.translate((@showxi + .5) * cell_size, (@showyi + .5) * cell_size)
@@ -160,8 +169,13 @@ renderBot = (ctx) ->
   ctx.closePath()
 
   ctx.lineWidth = 1.5
-  ctx.strokeStyle = 'white'
   ctx.fillStyle = 'black'
+
+  intensity = Math.floor((1-dying)*(1-dying)*255)
+  if dying == 0
+    ctx.strokeStyle = 'white'
+  else
+    ctx.strokeStyle = "rgb(#{intensity},#{intensity},#{intensity})"
 
   ctx.fill()
   ctx.stroke()
@@ -453,8 +467,10 @@ undoButtonAction = (level) ->
   level.commands = level.commands[...-1]
 
   level.resetAndRun()
-  while level.next_command < level.commands.length && level.step()
-    true
+  while level.next_command < level.commands.length
+    if !level.step()
+      level.reset()
+      break
 
   level.mode = levelMode.STOP
 
@@ -536,6 +552,7 @@ levelMode =
 levelAnimMode =
   READY: 1  # ready to run the next command
   MOVING: 2 # animating movement
+  DYING: 3  # animating move into an invalid state
 
 resetLevel = ->
   @bot.showxi = @bot.xi = @initial_bot_location.xi
@@ -615,17 +632,25 @@ animateLevel = (t) ->
         @animation_mode = levelAnimMode.MOVING
         @show_current_command = step_command
       else
-        # TODO: Need to play a death animation and restart
+        @move_control = next_move_control
+        @animation_mode = levelAnimMode.DYING
+        @show_current_command = step_command
 
   # immediately run this if we switched to MOVING above
-  if @animation_mode == levelAnimMode.MOVING
+  if @animation_mode == levelAnimMode.MOVING or
+     @animation_mode == levelAnimMode.DYING
     rel_t = (t-@move_control.start.t)/@move_control.duration
-    @bot.showxi = lerp rel_t, @move_control.start.x, @bot.xi
-    @bot.showyi = lerp rel_t, @move_control.start.y, @bot.yi
-    @bot.showdir = @bot.dir
 
     if rel_t >= 1
-      @animation_mode = levelAnimMode.READY
+      if @animation_mode == levelAnimMode.DYING
+        # revert after death
+        @reset()
+      else # MOVING
+        @animation_mode = levelAnimMode.READY
+    else
+      @bot.showxi = lerp rel_t, @move_control.start.x, @bot.xi
+      @bot.showyi = lerp rel_t, @move_control.start.y, @bot.yi
+      @bot.showdir = @bot.dir
 
   @last_t = t
 
@@ -645,8 +670,7 @@ stepLevelSimulation = ->
   for o in @obstacles
     if o.isHit(@bot.xi, @bot.yi, @frame)
       console.log("hit obstacle at frame " + @frame)
-      # TODO: error display, take back move (I think that goes elsewhere)
-      #return false
+      return false
 
   @advanceNextCommand()
 
