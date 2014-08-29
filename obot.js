@@ -35,6 +35,12 @@ PLAYREV: advance to previous command, if no more commands, STOPDONE
    left to be executed in PLAY or PLAYFWD, respectively -1 in PLAYREV
  */
 
+
+/*
+How does death work?
+just reset after animation
+ */
+
 (function() {
   var DOWN, LEFT, Mobile_obstacle, RIGHT, Static_obstacle, UP, addCommandButtonAction, animateLevel, arrowButtonRender, arrowCommandRender, bot_points, bot_size, bot_speed, cell_size, clear, clickControlPanel, command_scrim_points, command_size, cont_cnv, cont_ctx, control_bevel, control_panel, control_size, controls_start, down_arrow_cmd, go_down_button, go_left_button, go_right_button, go_up_button, hr3, inner_command_size, inner_control_size, left_arrow_cmd, lerp, levelAnimMode, levelMode, level_cnv, level_ctx, level_state, max_commands, moveCommand, noActionCommand, playButtonAction, play_button, prog_cnv, prog_ctx, render, renderArrow, renderBot, renderButtonScrim, renderCommand, renderControlPanel, renderLevel, renderMine, renderPlayButton, renderUndoButton, resetAndRunLevel, resetLevel, reverseCommandRender, reverseDir, reverse_cmd, right_arrow_cmd, rr3, setupControlPanel, setupLevel, stepLevelSimulation, stop, undoButtonAction, undo_button, up_arrow_cmd;
 
@@ -105,7 +111,7 @@ PLAYREV: advance to previous command, if no more commands, STOPDONE
       o = _ref[_k];
       o.render(ctx, show_frame, frame_t, t);
     }
-    this.bot.render(ctx);
+    this.bot.render(ctx, this.animation_mode === levelAnimMode.DYING ? (t - this.move_control.start.t) * bot_speed : 0);
     ctx = prog_ctx;
     _ref1 = this.commands;
     for (i = _l = 0, _len1 = _ref1.length; _l < _len1; i = ++_l) {
@@ -153,8 +159,8 @@ PLAYREV: advance to previous command, if no more commands, STOPDONE
     }
   ];
 
-  renderBot = function(ctx) {
-    var bp;
+  renderBot = function(ctx, dying) {
+    var bp, intensity;
     bp = bot_points;
     ctx.save();
     ctx.translate((this.showxi + .5) * cell_size, (this.showyi + .5) * cell_size);
@@ -165,8 +171,13 @@ PLAYREV: advance to previous command, if no more commands, STOPDONE
     ctx.lineTo(bp[2].x, bp[2].y);
     ctx.closePath();
     ctx.lineWidth = 1.5;
-    ctx.strokeStyle = 'white';
     ctx.fillStyle = 'black';
+    intensity = Math.floor((1 - dying) * (1 - dying) * 255);
+    if (dying === 0) {
+      ctx.strokeStyle = 'white';
+    } else {
+      ctx.strokeStyle = "rgb(" + intensity + "," + intensity + "," + intensity + ")";
+    }
     ctx.fill();
     ctx.stroke();
     ctx.beginPath();
@@ -482,8 +493,11 @@ PLAYREV: advance to previous command, if no more commands, STOPDONE
     }
     level.commands = level.commands.slice(0, -1);
     level.resetAndRun();
-    while (level.next_command < level.commands.length && level.step()) {
-      true;
+    while (level.next_command < level.commands.length) {
+      if (!level.step()) {
+        level.reset();
+        break;
+      }
     }
     return level.mode = levelMode.STOP;
   };
@@ -587,7 +601,8 @@ PLAYREV: advance to previous command, if no more commands, STOPDONE
 
   levelAnimMode = {
     READY: 1,
-    MOVING: 2
+    MOVING: 2,
+    DYING: 3
   };
 
   resetLevel = function() {
@@ -671,17 +686,24 @@ PLAYREV: advance to previous command, if no more commands, STOPDONE
           this.animation_mode = levelAnimMode.MOVING;
           this.show_current_command = step_command;
         } else {
-
+          this.move_control = next_move_control;
+          this.animation_mode = levelAnimMode.DYING;
+          this.show_current_command = step_command;
         }
       }
     }
-    if (this.animation_mode === levelAnimMode.MOVING) {
+    if (this.animation_mode === levelAnimMode.MOVING || this.animation_mode === levelAnimMode.DYING) {
       rel_t = (t - this.move_control.start.t) / this.move_control.duration;
-      this.bot.showxi = lerp(rel_t, this.move_control.start.x, this.bot.xi);
-      this.bot.showyi = lerp(rel_t, this.move_control.start.y, this.bot.yi);
-      this.bot.showdir = this.bot.dir;
       if (rel_t >= 1) {
-        this.animation_mode = levelAnimMode.READY;
+        if (this.animation_mode === levelAnimMode.DYING) {
+          this.reset();
+        } else {
+          this.animation_mode = levelAnimMode.READY;
+        }
+      } else {
+        this.bot.showxi = lerp(rel_t, this.move_control.start.x, this.bot.xi);
+        this.bot.showyi = lerp(rel_t, this.move_control.start.y, this.bot.yi);
+        this.bot.showdir = this.bot.dir;
       }
     }
     this.last_t = t;
@@ -701,6 +723,7 @@ PLAYREV: advance to previous command, if no more commands, STOPDONE
       o = _ref[_i];
       if (o.isHit(this.bot.xi, this.bot.yi, this.frame)) {
         console.log("hit obstacle at frame " + this.frame);
+        return false;
       }
     }
     this.advanceNextCommand();
